@@ -1,0 +1,579 @@
+import groovy.xml.MarkupBuilder
+
+buildscript {
+    ext {
+        springBootVersion = '2.7.0'
+        springSecurityVersion = '5.1.6.RELEASE'
+        flywayVersion = '5.0.7'
+        jooqVersion = '3.10.5'
+        postgresqlJdbcVersion = '42.2.20'
+        retrofitVersion = '2.5.0'
+        okhttpVersion = '3.13.0'
+        schema = "${buildSchema}"
+        jmimemagicVersion = '0.1.5'
+    }
+    repositories {
+        // maven { 
+        //     credentials  {
+        //         username = "${mavenUser}"
+        //         password = "${mavenPassword}"
+        //     }
+        //     url "${mavenRepoPw}"
+        // }
+        maven { url "https://repo.spring.io/milestone" }
+        maven { url "https://plugins.gradle.org/m2/" }
+        mavenCentral()
+        jcenter()
+    }
+    dependencies {
+        classpath 'org.codehaus.groovy:groovy-xml:3.0.10'
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath("org.jooq:jooq-codegen:${jooqVersion}")
+        classpath("org.postgresql:postgresql:${postgresqlJdbcVersion}")
+        classpath("org.asciidoctor:asciidoctor-gradle-plugin:1.5.3")
+        // classpath("gradle.plugin.com.boxfuse.client:gradle-plugin-publishing:${flywayVersion}")
+        classpath("org.flywaydb:flyway-gradle-plugin:${flywayVersion}")
+      //  classpath 'org.unbroken-dome.gradle-plugins:gradle-testsets-plugin:1.4.3'
+        classpath 'com.adarshr:gradle-test-logger-plugin:1.1.2'
+        classpath 'com.github.ksoichiro:gradle-console-reporter:0.5.0'
+        classpath files("build/tools-classes/main")
+    }
+}
+//added
+plugins {
+    id "org.unbroken-dome.test-sets" version "4.0.0"
+}
+//end
+
+apply plugin: 'java'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'org.flywaydb.flyway'
+//apply plugin: 'org.unbroken-dome.test-sets'
+apply plugin: 'maven-publish'
+
+jar {
+    archivesBaseName="api"
+    project.version=""
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = "sg.com.prudential.pacs.pw"
+            artifactId = "api"
+            version = project.hasProperty("projVersion") ? project.projVersion : "test"
+            from components.java
+        }
+    }
+    repositories {
+        maven { 
+            credentials  {
+                username = "${mavenUser}"
+                password = "${mavenPassword}"
+            }
+            url "${mavenRepoPwLocal}"
+        }
+    }
+}
+
+File f = new File(project.rootDir, "local.properties");
+if (f.exists()) {
+    Properties props = new Properties()
+    f.withInputStream {
+        props.load it
+    }
+    props.each { key, value -> project.ext.set(key, value)
+    }
+}
+
+ext.runReport = { ->
+    return (!project.hasProperty('disableReport'))
+}
+
+
+if (runReport()) {
+    apply plugin: 'com.adarshr.test-logger'
+    apply plugin: 'com.github.ksoichiro.console.reporter'
+    apply plugin: 'jacoco'
+}
+
+
+flyway {
+    url = "${jooqJdbcUrl}"
+    user = "${jooqJdbcUser}"
+    password = "${jooqJdbcPassword}"
+    schemas = ["${schema}"]
+    locations = ["filesystem:src/main/resources/db/migration","filesystem:src/main/resources/db/migration-dev"]
+    placeholders = [
+        'schema': "${schema}",
+        'svc_user': "${jooqJdbcUser}",
+        'support_user': "${jooqJdbcUser}"
+    ]
+}
+
+configurations {
+    tools
+}
+
+version = '0.0.1-SNAPSHOT'
+repositories {
+    // maven { 
+    //     credentials  {
+    //         username = "${mavenUser}"
+    //         password = "${mavenPassword}"
+    //     }
+    //     url "${mavenRepoPw}"
+    // }
+    mavenCentral()
+    maven { url "https://artifact.aspose.com/repo/"}
+    maven { url "https://repo.spring.io/snapshot" }
+    maven { url "https://repo.spring.io/milestone" }
+    maven { url "https://artifacts.alfresco.com/nexus/content/repositories/public/"}
+    maven { url "https://build.shibboleth.net/nexus/content/groups/public/" }
+    maven { url "https://repo.adobe.com/nexus/content/repositories/public/" }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs 'src/main/java'
+            srcDirs 'gen/main/java'
+            /**
+             * these will not need in runtime
+             */
+            exclude 'src/main/java/com/unchartedpartners/tools/**'
+        }
+    }
+}
+testSets {
+    intest
+    doc
+}
+
+
+
+bootRun {
+    doFirst {
+        environment 'mmp_schema', "${schema}"
+        environment 'jooqJdbcUrl', "${jooqJdbcUrl}"
+        environment 'jooqJdbcPassword', "${jooqJdbcPassword}"
+        environment 'jooqJdbcUser', "${jooqJdbcUser}"
+        environment 'jooqJdbcAs400Url', "${jooqJdbcAs400Url}"
+        environment 'jooqJdbcAs400User', "${jooqJdbcAs400User}"
+        environment 'jooqJdbcAs400Password', "${jooqJdbcAs400Password}"
+    }
+}
+
+test {
+    doFirst {
+        delete "${rootDir}/.tmp"
+    }
+}
+
+intest {
+    doFirst {
+        delete "${rootDir}/.tmp"
+        environment 'mmp_schema', "${schema}"
+        environment 'jooqJdbcUrl', "${jooqJdbcUrl}"
+        environment 'jooqJdbcPassword', "${jooqJdbcPassword}"
+        environment 'jooqJdbcUser', "${jooqJdbcUser}"
+        environment 'jooqJdbcAs400Url', "${jooqJdbcAs400Url}"
+        environment 'jooqJdbcAs400User', "${jooqJdbcAs400User}"
+        environment 'jooqJdbcAs400Password', "${jooqJdbcAs400Password}"
+    }
+    testLogging {
+        if (runReport()) {
+            afterSuite { desc, result ->
+                if (!desc.parent) { // will match the outermost suite
+                    println ""
+                    println "#######################################################################################"
+                    println "# intest - Results: ${result.resultType} (${result.testCount} tests, ${result.successfulTestCount} successes, ${result.failedTestCount} failures, ${result.skippedTestCount} skipped)"
+                    println "#######################################################################################"
+                    println ""
+                }
+            }
+        } else {
+            outputs.upToDateWhen { false }
+            showStandardStreams = true
+
+        }
+
+    }
+}
+tasks.withType(JavaCompile) {
+    options.compilerArgs << "-parameters"
+    options.encoding = "UTF-8"
+}
+test {
+    testLogging {
+        afterSuite { desc, result ->
+            if (!desc.parent) { // will match the outermost suite
+                println ""
+                println "#######################################################################################"
+                println "# test - Results: ${result.resultType} (${result.testCount} tests, ${result.successfulTestCount} successes, ${result.failedTestCount} failures, ${result.skippedTestCount} skipped)"
+                println "#######################################################################################"
+                println ""
+            }
+        }
+    }
+}
+
+configurations {
+    all*.exclude group: 'log4j'
+    all*.exclude group: 'org.apache.logging.log4j'
+    all*.exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+    all*.exclude group: 'org.codehaus.jackson'
+    all*.exclude group: 'commons-logging'
+    all*.exclude group: 'org.apache.struts'
+    all*.exclude group: 'commons-httpclient'
+    all*.exclude group: 'org.owasp.antisamy'
+    all*.exclude group: 'org.beanshell'
+    all*.exclude group: 'ca.juliusdavies'
+}
+dependencies {
+    implementation 'org.projectlombok:lombok:1.18.20'
+    implementation 'junit:junit:4.13.1'
+    annotationProcessor 'org.projectlombok:lombok:1.18.8'
+    runtimeOnly("org.springframework.boot:spring-boot-properties-migrator")
+    implementation fileTree(dir: 'ext-libs', include: 'db2java.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'db2jcc_license_cu.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'db2jcc4.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'cmbsdk81.jar')
+
+    //added
+    implementation fileTree(dir: 'ext-libs', include: 'jooq-3.10.5.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'jooq-codegen-3.10.5.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'jooq-meta-3.10.5.jar')
+    implementation group: 'com.zaxxer', name: 'HikariCP', version: '2.7.9'
+    implementation group: 'org.springframework', name: 'spring-tx', version: '5.0.7.RELEASE'
+
+    //end
+
+
+    //compile files('ext-libs/test/cmbsdk81.jar')
+//    compile files('ext-libs/db2java.jar')
+//    compile files('ext-libs/db2jcc_license_cu.jar')
+//    compile files('ext-libs/db2jcc4.jar')
+
+    // CYBS Simple Order API SDK
+   // compile files('ext-libs/cybersource-sdk-java-6.2.3.jar')
+    implementation fileTree(dir: 'ext-libs', include: 'cybersource-sdk-java-6.2.3.jar')
+
+   // implementation("org.springframework.boot:spring-boot-starter-jooq:${springBootVersion}") //remove related to jooq
+    implementation ("org.springframework.boot:spring-boot-starter-web:${springBootVersion}")
+    implementation ("org.springframework.boot:spring-boot-starter-actuator:${springBootVersion}")
+  //  compile("org.springframework.security:spring-security-core:${springSecurityVersion}") //remove related to spring security web
+   // compile("org.springframework.security:spring-security-web:${springSecurityVersion}")
+
+    //working on upguradeding spring-security-web
+    implementation group: 'org.springframework.security', name: 'spring-security-web', version: '5.6.1'
+    implementation group: 'org.springframework', name: 'spring-web', version: '5.3.19'
+    implementation group: 'org.springframework', name: 'spring-webmvc', version: '5.3.18'
+    implementation group: 'org.springframework.security', name: 'spring-security-core', version: '5.6.2'
+    //implementation group: 'org.springframework.security', name: 'spring-security-config', version: '5.1.6.RELEASE'
+    implementation group: 'org.springframework.security', name: 'spring-security-config', version: '5.6.1'
+
+//    implementation group: 'com.sun.xml.bind', name: 'jaxb-core', version: '2.3.0'
+//    implementation group: 'javax.xml.bind', name: 'jaxb-api', version: '2.3.1'
+//    implementation group: 'com.sun.xml.bind', name: 'jaxb-impl', version: '2.3.1'
+
+  //  compile("org.springframework.security:spring-security-config:${springSecurityVersion}")
+    implementation("org.springframework:spring-context-support:${springSecurityVersion}")
+//    compile "org.springframework:spring-webmvc:5.0.10.RELEASE"
+//    compile "org.springframework:spring-web:5.0.10.RELEASE"
+    implementation("org.springframework.security.oauth:spring-security-oauth2:2.3.6.RELEASE")
+    implementation "org.springframework.security:spring-security-jwt:1.0.9.RELEASE"
+
+    implementation group: 'javax.mail', name: 'mail', version: '1.4.7'
+    implementation "org.bouncycastle:bcpkix-jdk15on:1.63"
+    implementation "org.bouncycastle:bcprov-jdk15on:1.63"
+
+    implementation "com.opencsv:opencsv:4.4"
+
+    implementation group: 'com.google.guava', name: 'guava', version: '25.1-jre'
+    implementation group: 'org.postgresql', name: 'postgresql', version: "${postgresqlJdbcVersion}"
+  //  implementation("org.jooq:jooq-codegen:${jooqVersion}")
+    implementation "org.flywaydb:flyway-core:${flywayVersion}"
+//    implementation('org.projectlombok:lombok:1.18.22')
+    implementation group: 'com.itextpdf.tool', name: 'xmlworker', version: '5.5.13'
+    implementation group: 'com.itextpdf', name: 'itextpdf', version: '5.5.13'
+    implementation group: 'com.alibaba', name: 'easyexcel', version: '2.2.6'
+
+    //compile "commons-collections:commons-collections:3.2.2"
+    implementation group: 'org.apache.velocity', name: 'velocity-engine-core', version: '2.0'
+    implementation("net.sf.jmimemagic:jmimemagic:${jmimemagicVersion}")
+    implementation group: 'org.owasp', name: 'security-logging-logback', version: '1.1.6'
+    testImplementation("org.springframework.boot:spring-boot-devtools:${springBootVersion}")
+    testImplementation("org.springframework.boot:spring-boot-starter-test:${springBootVersion}")
+    testImplementation("org.springframework.security:spring-security-test:${springSecurityVersion}")
+    testImplementation "com.jayway.restassured:rest-assured:2.9.0"
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+    implementation "com.squareup.okhttp3:logging-interceptor:$okhttpVersion"
+    implementation "com.squareup.retrofit2:retrofit:$retrofitVersion"
+    implementation("com.squareup.retrofit2:converter-jackson:$retrofitVersion")
+    implementation group: 'net.rakugakibox.spring.boot', name: 'orika-spring-boot-starter', version: '1.6.0'
+    tools("org.jooq:jooq-codegen:${jooqVersion}")
+    // used to parse excel file
+    implementation group: 'org.apache.poi', name: 'poi', version: '3.17'
+    implementation group: 'org.apache.poi', name: 'poi-ooxml', version: '3.17'
+
+    implementation group: 'commons-validator', name: 'commons-validator', version: '1.6'
+
+    implementation group: 'org.apache.velocity', name: 'velocity-tools', version: '2.0'
+    implementation group: 'net.lingala.zip4j', name: 'zip4j', version: '2.1.1'
+    implementation group: 'com.braintreepayments.gateway', name: 'braintree-java', version: '2.79.0'
+
+    implementation group: 'com.jcraft', name: 'jsch', version: '0.1.54'
+    implementation("com.fasterxml.uuid:java-uuid-generator:3.1.5")
+    implementation 'com.fasterxml.jackson.core:jackson-core:2.10.0.pr3'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.10.0.pr3'
+    implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.9.8"
+    implementation "com.fasterxml:classmate:1.5.1"
+    implementation "dom4j:dom4j:1.5"
+    implementation "commons-io:commons-io:2.5"
+    implementation "org.apache.tomcat.embed:tomcat-embed-core:9.0.24"
+
+    // Dependencies for cybersource sdk
+    implementation group: 'org.apache.ws.security', name: 'wss4j', version: '1.6.19'
+    // https://mvnrepository.com/artifact/org.opensaml/opensaml
+    implementation group: 'org.opensaml', name: 'opensaml', version: '2.6.6'
+//    compile group: 'xml-security', name: 'xmlsec', version: '1.3.0'
+    // Used for retieving BINs from Neptune -> LA
+    implementation group: 'net.sf.jt400', name: 'jt400', version: '9.6'
+
+    implementation group: 'com.aspose', name: 'aspose-words', version: '18.9', classifier: "jdk16"
+    implementation group: 'com.aspose', name: 'aspose-cells', version: '18.9'
+    implementation group: 'com.aspose', name: 'aspose-slides', version: '18.8', classifier: "jdk16"
+    // https://mvnrepository.com/artifact/org.apache.commons/commons-imaging
+    implementation group: 'org.apache.commons', name: 'commons-imaging', version: '1.0-alpha2'
+    // https://mvnrepository.com/artifact/org.apache.httpcomponents/httpclient
+    implementation group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.6'
+    // https://mvnrepository.com/artifact/org.owasp.esapi/esapi
+    implementation group: 'org.owasp.esapi', name: 'esapi', version: '2.1.0.1'
+
+    // https://mvnrepository.com/artifact/org.apache.xmlgraphics/batik-ext
+    implementation group: 'org.apache.xmlgraphics', name: 'batik-ext', version: '1.10'
+
+    // https://mvnrepository.com/artifact/org.apache.xmlgraphics/batik-css
+    implementation group: 'org.apache.xmlgraphics', name: 'batik-css', version: '1.10'
+
+    // https://mvnrepository.com/artifact/org.apache.xmlgraphics/batik-util
+    implementation group: 'org.apache.xmlgraphics', name: 'batik-util', version: '1.10'
+
+    // https://mvnrepository.com/artifact/xalan/xalan
+    implementation group: 'xalan', name: 'xalan', version: '2.7.2'
+    // https://mvnrepository.com/artifact/xerces/xercesImpl
+    implementation group: 'xerces', name: 'xercesImpl', version: '2.12.0'
+
+    // https://mvnrepository.com/artifact/commons-fileupload/commons-fileupload
+    implementation group: 'commons-fileupload', name: 'commons-fileupload', version: '1.3.3'
+    // https://mvnrepository.com/artifact/commons-beanutils/commons-beanutils
+    implementation group: 'commons-beanutils', name: 'commons-beanutils', version: '1.9.3'
+    // https://mvnrepository.com/artifact/commons-beanutils/commons-beanutils-core
+    implementation group: 'commons-beanutils', name: 'commons-beanutils-core', version: '1.8.1'
+
+    implementation group: 'com.hierynomus', name: 'smbj', version: '0.10.0'
+    implementation group: 'io.springfox', name: 'springfox-swagger2', version: '2.9.2'
+    implementation group: 'io.springfox', name: 'springfox-swagger-ui', version: '2.9.2'
+    implementation group: 'org.springframework.boot', name: 'spring-boot-starter-validation', version: '2.6.4'
+
+
+    /**
+     * gradle require jdk , so should be ok
+     */
+    testImplementation files(org.gradle.internal.jvm.Jvm.current().toolsJar)
+}
+
+
+task compileTools(type: JavaCompile) {
+    options.fork = false
+    source = fileTree(dir: 'src/main/java', include: 'com/unchartedpartners/tools/*')
+    destinationDir = file('build/tools-classes/main')
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
+    classpath = configurations.tools
+}
+
+
+clean.doFirst {
+    delete "${rootDir}/gen"
+    delete "${rootDir}/.tmp"
+}
+
+
+
+ext.getJooqConfig = { ->
+    def writer = new StringWriter()
+    def xml = new MarkupBuilder(writer).
+            configuration('xmlns': 'http://www.jooq.org/xsd/jooq-codegen-3.10.0.xsd') {
+                jdbc() {
+                    driver('org.postgresql.Driver')
+                    url("${jooqJdbcUrl}")
+                    user("${jooqJdbcUser}")
+                    password("${jooqJdbcPassword}")
+                }
+                generator() {
+                    name 'com.unchartedpartners.tools.JooqGenerator'
+                    database() {
+                        name "org.jooq.util.postgres.PostgresDatabase"
+                        inputSchema "${schema}"
+                        // to make it able to generate dao from view
+                        syntheticPrimaryKeys "${schema}\\..*PRODUCT_CURRENT\\.ID"
+                        overridePrimaryKeys 'override_primmary_key'
+                        recordVersionFields 'version'
+                        includes '.*'
+                        excludes 'flyway_schema_history'
+                        forcedTypes {
+                            [forcedType {
+                                userType 'java.util.Set'
+                                converter 'com.unchartedpartners.jooq.PostgresArraySetBinding'
+                                expression '.*SCOPES'
+                                types "ARRAY"
+                            },
+                             forcedType {
+                                 userType 'java.util.Map'
+                                 converter 'com.unchartedpartners.jooq.PostgresJsonMapBinder'
+                                 expression '.*'
+                                 types "JSON"
+                             },
+                             forcedType {
+                                 userType 'java.lang.Integer'
+                                 converter 'com.unchartedpartners.jooq.PostgresSmallIntIntegerConverter'
+                                 expression '.*'
+                                 types "SMALLINT"
+                             }
+                            ]
+                        }
+                    }
+                    generate([:]) {
+                        pojos true
+                        daos true
+                        relations true
+                        springAnnotations true
+                    }
+                    target() {
+                        packageName('com.unchartedpartners.databases')
+                        directory('gen/main/java')
+                    }
+                }
+            }
+    return writer;
+}
+
+task writeJooq {
+    doLast {
+
+        def writer = getJooqConfig()
+        def file = new File("mmp.xml")
+        file.newWriter().withWriter {
+            file << new StringReader(writer.toString())
+        }
+
+    }
+
+}
+
+task jooq {
+    doLast {
+        def writer = getJooqConfig()
+        org.jooq.util.GenerationTool.generate(
+                javax.xml.bind.JAXB.
+                        unmarshal(new StringReader(writer.toString()), org.jooq.util.jaxb.Configuration.class)
+        )
+    }
+}
+jooq.dependsOn flywayInfo
+jooq.dependsOn flywayMigrate
+
+task raml(type: JavaExec) {
+    main = "com.unchartedpartners.doc.RamlGenerator"
+    args = ["http://localhost:8080"]
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.doc.runtimeClasspath
+}
+
+task setupInitSql(type: Copy) {
+    from 'src/main/resources/db/migration'
+    into 'build/init/sql'
+    includeEmptyDirs = true
+}
+
+task setupInitSqlDev(type: Copy) {
+    from 'src/main/resources/db/migration-dev'
+    into 'build/init/sql-dev'
+    includeEmptyDirs = true
+}
+
+task setupInitSqlUat(type: Copy) {
+    from 'src/main/resources/db/migration-uat'
+    into 'build/init/sql-uat'
+    includeEmptyDirs = true
+}
+
+task setupInitSqlProd(type: Copy) {
+    from 'src/main/resources/db/migration-prod'
+    into 'build/init/sql-prod'
+    includeEmptyDirs = true
+}
+
+task setupInitDocker(type: Copy) {
+    from 'tools/init'
+    into 'build/init'
+}
+
+task setupPaymentJREDocker(type: Copy) {
+    from 'tools/payment/jre'
+    into 'build/payment/jre'
+}
+
+task setupPaymentSecurityDocker(type: Copy) {
+    from 'tools/payment/security'
+    into 'build/payment/security'
+}
+
+setupInitDocker.dependsOn setupInitSql
+setupInitDocker.dependsOn setupInitSqlDev
+setupInitDocker.dependsOn setupInitSqlProd
+setupInitDocker.dependsOn setupInitSqlUat
+setupInitDocker.dependsOn setupPaymentJREDocker
+setupInitDocker.dependsOn setupPaymentSecurityDocker
+build.dependsOn setupInitDocker
+
+if (runReport()) {
+    testlogger {
+        theme 'mocha'
+        showSummary true
+    }
+
+    consoleReporter {
+        junit {
+            stdoutEnabled true
+            stderrEnabled true
+            stacktraceEnabled true
+        }
+        jacoco {
+            thresholdFine 50
+        }
+    }
+
+    check.dependsOn('jacocoTestReport')
+
+    jacocoTestReport {
+        reports {
+            xml.enabled false
+            csv.enabled false
+            html.destination file("${buildDir}/jacocoHtml")
+        }
+
+        executionData test, intest
+
+        afterEvaluate {
+            classDirectories.from = files(classDirectories.files.collect {
+                fileTree(dir: it,
+                         exclude: ['com/unchartedpartners/databases/**',
+                                   'com/unchartedpartners/rest/doc/**'])
+            })
+        }
+    }
+
+}
